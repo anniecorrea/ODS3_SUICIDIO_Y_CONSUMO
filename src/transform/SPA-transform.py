@@ -1,30 +1,9 @@
-# spa_transform.py
-# -*- coding: utf-8 -*-
-"""
-Transformación del dataset SPA (consumo de sustancias) a formato 'tidy'
-Listo para mergear con Conductas Suicidas.
-
-Salida (columnas base):
-    anio, upz, sexo, ciclo_vida, nivel_educativo, casos
-Además (si existen): columnas SITIOHABITUALCONSUMO_* agregadas como
-sumatoria de casos en los que el sitio = "sí" (ponderadas por 'casos').
-
-Uso CLI:
-    python spa_transform.py --input ../data/consumosustancias.csv --output ../data_out/spa_tidy.csv
-Opcionales:
-    --drop-sin-dato           -> excluye filas con upz = 'sin dato'
-    --no-group                -> no agrega; conserva filas originales
-    --report ../data_out/spa_qc.json -> guarda reporte de calidad
-"""
-
-from __future__ import annotations
 import argparse
 import json
 import unicodedata
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Tuple, Union, Optional
 
-import numpy as np
 import pandas as pd
 
 
@@ -32,7 +11,7 @@ BAD_SET = {"", "nan", "sin dato", "upz sin asignar", "s/d", "n.a.", "n.a", "na"}
 
 
 # ----------------------------- utilidades -----------------------------
-def _normalize_text(v: str | float | None) -> str | None:
+def _normalize_text(v: Union[str, float, None]) -> Optional[str]:
     """Minúsculas, sin acentos y trim. Mantiene None/NaN."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return None

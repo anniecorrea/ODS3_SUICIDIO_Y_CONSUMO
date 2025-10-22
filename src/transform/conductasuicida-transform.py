@@ -1,30 +1,9 @@
-# conductasuicida_transform.py
-# -*- coding: utf-8 -*-
-"""
-Transformación del dataset de Conductas Suicidas a formato 'tidy' alineado con SPA.
-
-Salida base:
-    anio, upz, sexo, ciclo_vida, nivel_educativo, casos
-+ Factores (si existen, sumados por grupo):
-    enfermedades_dolorosas, maltrato_sexual, muerte_familiar, conflicto_pareja,
-    problemas_economicos, esc_educ, problemas_juridicos, problemas_laborales, suicidio_amigo
-Opcionales:
-    --split-clasif -> agrega 'clasificacion' (ideacion/intento/otra/sin dato)
-    --drop-sin-dato -> excluye filas con upz = 'sin dato'
-    --no-group -> no agrega (conserva filas)
-    --report -> guarda QC
-Uso:
-    python conductasuicida_transform.py --input ../data/conductasuicida.csv --output ../data_out/suicida_tidy.csv
-"""
-
-from __future__ import annotations
 import argparse
 import json
 import unicodedata
 from pathlib import Path
-from typing import Dict, Iterable, Tuple, List
+from typing import Dict, Iterable, Tuple, List, Union, Optional
 
-import numpy as np
 import pandas as pd
 
 BAD_SET = {"", "nan", "sin dato", "upz sin asignar", "s/d", "n.a.", "n.a", "na"}
@@ -43,7 +22,7 @@ RISK_COLS: List[str] = [
 
 
 # ----------------------------- utilidades -----------------------------
-def _normalize_text(v: str | float | None) -> str | None:
+def _normalize_text(v: Union[str, float, None]) -> Optional[str]:
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return None
     s = str(v).strip().lower()
@@ -183,7 +162,8 @@ def transform_conductasuicida(
 
     # 8) agregación
     group_key = key + (["clasificacion"] if split_clasif else [])
-    agg = {"casos": "sum"} | {c: "sum" for c in present_risks}
+    # Compatible con Python 3.7 - usar {**dict1, **dict2} en lugar de dict1 | dict2
+    agg = {**{"casos": "sum"}, **{c: "sum" for c in present_risks}}
     if aggregate:
         df = df.groupby(group_key, dropna=False, as_index=False).agg(agg)
 

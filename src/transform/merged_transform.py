@@ -1,33 +1,8 @@
-# merge_spa_suicidas.py
-# -*- coding: utf-8 -*-
-"""
-Une las salidas tidy de SPA y Conductas Suicidas.
-
-Requiere que ambos CSV/DF tengan al menos estas columnas (clave):
-  anio, upz, sexo, ciclo_vida, nivel_educativo
-Además:
-  - SPA: 'casos' o 'casos_spa' y, opcionalmente, columnas 'SITIOHABITUALCONSUMO_*'
-  - SUI: 'casos' o 'casos_sui' y, opcionalmente, factores de riesgo
-
-API principal (para DAG):
-  merged, qc = merge_spa_sui(spa_df, sui_df, how="inner", with_clasif=False, add_pcts=True)
-
-CLI (para correr local):
-  python merge_spa_suicidas.py \
-    --spa ../data_out/spa_tidy.csv \
-    --sui ../data_out/suicida_tidy.csv \
-    --output ../data_out/merge_spa_suicidas.csv \
-    --how inner \
-    --add-pcts \
-    --report ../data_out/merge_qc.json
-"""
-
-from __future__ import annotations
 import argparse
 import json
 import unicodedata
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 import pandas as pd
 
@@ -139,8 +114,8 @@ def merge_spa_sui(
 
 # ----------------- Helper IO para uso simple -----------------
 def load_and_merge(
-    spa_csv: str | Path,
-    sui_csv: str | Path,
+    spa_csv: Union[str, Path],
+    sui_csv: Union[str, Path],
     *,
     how: str = "inner",
     with_clasif: bool = False,
