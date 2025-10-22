@@ -224,61 +224,52 @@ def etl_pipeline():
             raise
 
     @task()
-    def load_results():
-        """Carga final - Valida y reporta los resultados del ETL."""
+    def load_to_mysql():
+        """Carga los datos transformados al modelo dimensional en MySQL."""
         try:
-            logger.info("Iniciando carga y validación de resultados...")
+            logger.info("Iniciando carga de datos a MySQL...")
             
-            import pandas as pd
-            import json
+            import subprocess
+            import os
             
-            # Verificar archivos generados
-            files_to_check = [
-                OUTPUT_DIR / "suicida_tidy.csv",
-                OUTPUT_DIR / "spa_tidy.csv",
-                OUTPUT_DIR / "merged_spa_suicidas.csv",
-                OUTPUT_DIR / "suicida_qc.json",
-                OUTPUT_DIR / "spa_qc.json",
-                OUTPUT_DIR / "merge_qc.json"
-            ]
+            # Crear directorio de salida si no existe
+            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
             
-            validation_results = {}
-            for file_path in files_to_check:
-                if file_path.exists():
-                    if file_path.suffix == '.csv':
-                        df = pd.read_csv(file_path)
-                        validation_results[str(file_path)] = {
-                            "exists": True,
-                            "rows": len(df),
-                            "columns": len(df.columns)
-                        }
-                    elif file_path.suffix == '.json':
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            data = json.load(f)
-                        validation_results[str(file_path)] = {
-                            "exists": True,
-                            "content": data
-                        }
-                else:
-                    validation_results[str(file_path)] = {"exists": False}
+            script_path = SRC_DIR / "load" / "load.py"
             
-            logger.info("Validación de archivos completada:")
-            for file, result in validation_results.items():
-                logger.info(f"  - {file}: {result}")
+            # Configuración de la base de datos - usar el servicio MySQL del docker-compose
+            db_host = os.getenv('MYSQL_HOST', 'mysql')
+            db_name = os.getenv('MYSQL_DATABASE', 'ODS3_SPA_SUICIDAS')
+            db_user = os.getenv('MYSQL_USER', 'root')
+            db_password = os.getenv('MYSQL_PASSWORD', 'airflow')
+            db_port = os.getenv('MYSQL_PORT', '3306')
             
-            # Guardar resumen de ejecución
-            summary = {
-                "execution_date": datetime.now().isoformat(),
-                "validation_results": validation_results,
-                "status": "completed"
-            }
+            logger.info(f"Conectando a MySQL en {db_host}:{db_port} con usuario {db_user}")
             
-            logger.info("Carga completada exitosamente. ETL finalizado.")
+            # Ejecutar el script de carga
+            result = subprocess.run([
+                "python",
+                str(script_path),
+                "--csv", str(OUTPUT_DIR / "merged_spa_suicidas.csv"),
+                "--host", db_host,
+                "--database", db_name,
+                "--user", db_user,
+                "--password", db_password,
+                "--port", db_port,
+                "--batch-size", "1000"
+            ], capture_output=True, text=True, cwd=str(BASE_DIR))
             
-            return {"status": "success", "summary": validation_results}
+            if result.returncode != 0:
+                logger.error(f"Error ejecutando carga a MySQL: {result.stderr}")
+                raise Exception(f"Carga a MySQL falló: {result.stderr}")
+            
+            logger.info(result.stdout)
+            logger.info("✓ Carga a MySQL completada exitosamente")
+            
+            return {"status": "success", "message": "Datos cargados en MySQL correctamente"}
             
         except Exception as e:
-            logger.error(f"Error en carga de resultados: {e}")
+            logger.error(f"Error en carga a MySQL: {e}")
             raise
 
     # Definir dependencias del pipeline
@@ -293,8 +284,8 @@ def etl_pipeline():
     # Merge (depende de ambas transformaciones)
     merge_task = merge_datasets()
     
-    # Load final (depende del merge)
-    load_task = load_results()
+    # Load a MySQL (depende del merge)
+    load_task = load_to_mysql()
     
     # Definir el flujo de dependencias
     extract_sui >> transform_sui >> merge_task

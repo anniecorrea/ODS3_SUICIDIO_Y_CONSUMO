@@ -2,6 +2,8 @@ import pandas as pd
 import mysql.connector
 from mysql.connector import Error
 import logging
+import argparse
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -348,32 +350,42 @@ def cargar_datos_modelo_dimensional(ruta_csv, host, database, user, password, po
 
 
 # ==============================================
-#USO
+# CLI - Interfaz de línea de comandos
+# ==============================================
+def _parse_args():
+    """Parser de argumentos de línea de comandos."""
+    p = argparse.ArgumentParser(description="Carga de datos transformados al modelo dimensional en MySQL.")
+    p.add_argument("--csv", required=True, type=Path, help="Ruta al archivo CSV con datos limpios")
+    p.add_argument("--host", required=True, type=str, help="Host del servidor MySQL")
+    p.add_argument("--database", required=True, type=str, help="Nombre de la base de datos")
+    p.add_argument("--user", required=True, type=str, help="Usuario de MySQL")
+    p.add_argument("--password", required=True, type=str, help="Contraseña de MySQL")
+    p.add_argument("--port", type=int, default=3306, help="Puerto de MySQL (default: 3306)")
+    p.add_argument("--batch-size", type=int, default=1000, help="Tamaño de lote para commits (default: 1000)")
+    return p.parse_args()
+
+
+# ==============================================
+# MAIN - Ejecución principal
 # ==============================================
 if __name__ == "__main__":
     
-    # Configuración
-    RUTA_CSV = '../../data_out/merged_spa_suicidas.csv'
-    DB_HOST = 'localhost'
-    DB_NAME = 'ODS3_SPA_SUICIDAS'
-    DB_USER = 'root'
-    DB_PASSWORD = 'annie'
-    DB_PORT = 3306
-    BATCH_SIZE = 1000
-
+    # Modo CLI: parsear argumentos
+    args = _parse_args()
+    
     try:
         # Paso 1: Conectar al servidor (sin base)
         connection = mysql.connector.connect(
-            host=DB_HOST,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            port=DB_PORT
+            host=args.host,
+            user=args.user,
+            password=args.password,
+            port=args.port
         )
         cursor = connection.cursor()
         logger.info("Conexión inicial al servidor MySQL establecida")
 
         # Paso 2: Crear base de datos y tablas
-        crear_base_y_tablas(cursor, DB_NAME)
+        crear_base_y_tablas(cursor, args.database)
         connection.commit()
         cursor.close()
         connection.close()
@@ -381,18 +393,23 @@ if __name__ == "__main__":
 
         # Paso 3: Ejecutar la carga
         stats = cargar_datos_modelo_dimensional(
-            ruta_csv=RUTA_CSV,
-            host=DB_HOST,
-            database=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            port=DB_PORT,
-            batch_size=BATCH_SIZE
+            ruta_csv=str(args.csv),
+            host=args.host,
+            database=args.database,
+            user=args.user,
+            password=args.password,
+            port=args.port,
+            batch_size=args.batch_size
         )
+        
+        logger.info("=" * 60)
+        logger.info("PROCESO COMPLETADO EXITOSAMENTE")
+        logger.info("=" * 60)
 
     except Error as e:
         logger.error(f"Error general: {e}")
+        raise
 
     finally:
-        if connection.is_connected():
+        if 'connection' in locals() and connection.is_connected():
             connection.close()
