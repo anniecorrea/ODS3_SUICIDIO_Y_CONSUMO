@@ -104,3 +104,4 @@ Thumbs.db
 # MySQL
 *.sql.backup
 *.sql.bak
+logs/
