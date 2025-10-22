@@ -6,6 +6,115 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def crear_base_y_tablas(cursor, database):
+    """
+    Crea la base de datos y las tablas del modelo dimensional si no existen.
+    """
+    logger.info(f"Verificando existencia de la base de datos: {database}")
+    cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database}")
+    cursor.execute(f"USE {database}")
+    logger.info("✓ Base de datos lista")
+
+    # Crear tablas
+    tablas_sql = [
+
+        # DIM TIEMPO
+        """
+        CREATE TABLE IF NOT EXISTS dim_tiempo (
+            id_tiempo INT AUTO_INCREMENT PRIMARY KEY,
+            anio INT NOT NULL,
+            UNIQUE (anio)
+        )
+        """,
+
+        # DIM UBICACION
+        """
+        CREATE TABLE IF NOT EXISTS dim_ubicacion (
+            id_ubicacion INT AUTO_INCREMENT PRIMARY KEY,
+            upz VARCHAR(100) NOT NULL,
+            UNIQUE (upz)
+        )
+        """,
+
+        # DIM PERFIL DEMOGRÁFICO
+        """
+        CREATE TABLE IF NOT EXISTS dim_perfil_demografico (
+            id_perfil INT AUTO_INCREMENT PRIMARY KEY,
+            sexo VARCHAR(20),
+            ciclo_vida VARCHAR(50),
+            nivel_educativo VARCHAR(100),
+            UNIQUE (sexo, ciclo_vida, nivel_educativo)
+        )
+        """,
+
+        # DIM CLASIFICACION
+        """
+        CREATE TABLE IF NOT EXISTS dim_clasificacion (
+            id_clasificacion INT AUTO_INCREMENT PRIMARY KEY,
+            clasificacion VARCHAR(100) NOT NULL,
+            UNIQUE (clasificacion)
+        )
+        """,
+
+        # FACT TABLE
+        """
+        CREATE TABLE IF NOT EXISTS fact_casos (
+            id_fact INT AUTO_INCREMENT PRIMARY KEY,
+
+            id_tiempo INT NOT NULL,
+            id_ubicacion INT NOT NULL,
+            id_perfil INT NOT NULL,
+            id_clasificacion INT NOT NULL,
+
+            casos_spa INT,
+            casos_sui INT,
+
+            sitio_vivienda INT,
+            sitio_parque INT,
+            sitio_est_educativo INT,
+            sitio_bares_tabernas INT,
+            sitio_via_publica INT,
+            sitio_casa_amigos INT,
+
+            pct_sitio_vivienda FLOAT,
+            pct_sitio_parque FLOAT,
+            pct_sitio_est_educativo FLOAT,
+            pct_sitio_bares_tabernas FLOAT,
+            pct_sitio_via_publica FLOAT,
+            pct_sitio_casa_amigos FLOAT,
+
+            enfermedades_dolorosas INT,
+            maltrato_sexual INT,
+            muerte_familiar INT,
+            conflicto_pareja INT,
+            problemas_economicos INT,
+            esc_educ INT,
+            problemas_juridicos INT,
+            problemas_laborales INT,
+            suicidio_amigo INT,
+
+            pct_enfermedades_dolorosas FLOAT,
+            pct_maltrato_sexual FLOAT,
+            pct_muerte_familiar FLOAT,
+            pct_conflicto_pareja FLOAT,
+            pct_problemas_economicos FLOAT,
+            pct_esc_educ FLOAT,
+            pct_problemas_juridicos FLOAT,
+            pct_problemas_laborales FLOAT,
+            pct_suicidio_amigo FLOAT,
+
+            FOREIGN KEY (id_tiempo) REFERENCES dim_tiempo(id_tiempo),
+            FOREIGN KEY (id_ubicacion) REFERENCES dim_ubicacion(id_ubicacion),
+            FOREIGN KEY (id_perfil) REFERENCES dim_perfil_demografico(id_perfil),
+            FOREIGN KEY (id_clasificacion) REFERENCES dim_clasificacion(id_clasificacion)
+        )
+        """
+    ]
+
+    for sql in tablas_sql:
+        cursor.execute(sql)
+    logger.info("✓ Tablas creadas o verificadas correctamente")
+
 
 def cargar_datos_modelo_dimensional(ruta_csv, host, database, user, password, port=3306, batch_size=1000):
     """
@@ -241,25 +350,49 @@ def cargar_datos_modelo_dimensional(ruta_csv, host, database, user, password, po
 # ==============================================
 #USO
 # ==============================================
-
 if __name__ == "__main__":
     
     # Configuración
-    RUTA_CSV = '../data_out/merged_spa_suicidas.csv'
+    RUTA_CSV = '../../data_out/merged_spa_suicidas.csv'
     DB_HOST = 'localhost'
     DB_NAME = 'ODS3_SPA_SUICIDAS'
     DB_USER = 'root'
     DB_PASSWORD = 'annie'
     DB_PORT = 3306
     BATCH_SIZE = 1000
-    
-    # Ejecutar carga
-    stats = cargar_datos_modelo_dimensional(
-        ruta_csv=RUTA_CSV,
-        host=DB_HOST,
-        database=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        port=DB_PORT,
-        batch_size=BATCH_SIZE
-    )
+
+    try:
+        # Paso 1: Conectar al servidor (sin base)
+        connection = mysql.connector.connect(
+            host=DB_HOST,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            port=DB_PORT
+        )
+        cursor = connection.cursor()
+        logger.info("Conexión inicial al servidor MySQL establecida")
+
+        # Paso 2: Crear base de datos y tablas
+        crear_base_y_tablas(cursor, DB_NAME)
+        connection.commit()
+        cursor.close()
+        connection.close()
+        logger.info("✓ Base de datos y tablas creadas/verificadas")
+
+        # Paso 3: Ejecutar la carga
+        stats = cargar_datos_modelo_dimensional(
+            ruta_csv=RUTA_CSV,
+            host=DB_HOST,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            port=DB_PORT,
+            batch_size=BATCH_SIZE
+        )
+
+    except Error as e:
+        logger.error(f"Error general: {e}")
+
+    finally:
+        if connection.is_connected():
+            connection.close()
