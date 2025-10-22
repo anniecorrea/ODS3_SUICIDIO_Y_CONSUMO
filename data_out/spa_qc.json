@@ -1,0 +1,17 @@
+{
+  "rows": 22603,
+  "nulls_by_col": {
+    "anio": 0,
+    "upz": 0,
+    "sexo": 0,
+    "ciclo_vida": 0,
+    "nivel_educativo": 0
+  },
+  "sin_dato_by_col": {
+    "upz": 0,
+    "sexo": 0,
+    "ciclo_vida": 0,
+    "nivel_educativo": 0
+  },
+  "duplicates_by_key": 0
+}

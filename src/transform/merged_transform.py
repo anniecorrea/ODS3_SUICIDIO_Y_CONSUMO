@@ -1,26 +1,34 @@
-# merge_lib.py
+# merge_spa_suicidas.py
 # -*- coding: utf-8 -*-
 """
-Funciones para unir SPA (consumo) y Conductas Suicidas ya transformados (tidy).
+Une las salidas tidy de SPA y Conductas Suicidas.
 
-Requiere que ambos DF tengan al menos las columnas de la clave:
+Requiere que ambos CSV/DF tengan al menos estas columnas (clave):
   anio, upz, sexo, ciclo_vida, nivel_educativo
-SPA debe tener 'casos' (o 'casos_spa'); Suicidas, 'casos' (o 'casos_sui').
+Además:
+  - SPA: 'casos' o 'casos_spa' y, opcionalmente, columnas 'SITIOHABITUALCONSUMO_*'
+  - SUI: 'casos' o 'casos_sui' y, opcionalmente, factores de riesgo
 
-API principal:
+API principal (para DAG):
   merged, qc = merge_spa_sui(spa_df, sui_df, how="inner", with_clasif=False, add_pcts=True)
 
-Donde:
-  - how: inner/left/right/outer
-  - with_clasif: si True y ambos DF traen 'clasificacion', se incluye en la clave
-  - add_pcts: agrega porcentajes derivados (sitios/factores)
-
-QC incluye filas sin match por lado, filas totales, y la clave usada.
+CLI (para correr local):
+  python merge_spa_suicidas.py \
+    --spa ../data_out/spa_tidy.csv \
+    --sui ../data_out/suicida_tidy.csv \
+    --output ../data_out/merge_spa_suicidas.csv \
+    --how inner \
+    --add-pcts \
+    --report ../data_out/merge_qc.json
 """
 
 from __future__ import annotations
-from typing import Dict, List, Tuple
+import argparse
+import json
 import unicodedata
+from pathlib import Path
+from typing import Dict, List, Tuple
+
 import pandas as pd
 
 KEY_BASE = ["anio", "upz", "sexo", "ciclo_vida", "nivel_educativo"]
@@ -30,6 +38,7 @@ RISK_COLS = [
     "problemas_economicos","esc_educ","problemas_juridicos","problemas_laborales","suicidio_amigo"
 ]
 
+# ----------------- utilidades internas -----------------
 def _normalize_text(s: pd.Series) -> pd.Series:
     """minúsculas, sin acentos y trim (defensivo)."""
     if s.dtype.name.startswith(("Int", "int", "Float", "float")):
@@ -39,15 +48,13 @@ def _normalize_text(s: pd.Series) -> pd.Series:
 
 def _prepare_spa(spa: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     df = spa.copy()
-    # normaliza clave
     for c in [c for c in KEY_BASE if c in df.columns]:
         df[c] = _normalize_text(df[c])
-    # renombra casos
+    if "clasificacion" in df.columns:
+        df["clasificacion"] = _normalize_text(df["clasificacion"])
     if "casos" in df.columns and "casos_spa" not in df.columns:
         df = df.rename(columns={"casos":"casos_spa"})
-    # detectar sitios
     site_cols = [c for c in df.columns if c.startswith("SITIOHABITUALCONSUMO_")]
-    # tipos
     if "casos_spa" in df.columns:
         df["casos_spa"] = pd.to_numeric(df["casos_spa"], errors="coerce").fillna(0).astype(int)
     for c in site_cols:
@@ -56,17 +63,13 @@ def _prepare_spa(spa: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
 
 def _prepare_sui(sui: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     df = sui.copy()
-    # normaliza clave
     for c in [c for c in KEY_BASE if c in df.columns]:
         df[c] = _normalize_text(df[c])
     if "clasificacion" in df.columns:
         df["clasificacion"] = _normalize_text(df["clasificacion"])
-    # renombra casos
     if "casos" in df.columns and "casos_sui" not in df.columns:
         df = df.rename(columns={"casos":"casos_sui"})
-    # detectar riesgos
     risk_cols = [c for c in RISK_COLS if c in df.columns]
-    # tipos
     if "casos_sui" in df.columns:
         df["casos_sui"] = pd.to_numeric(df["casos_sui"], errors="coerce").fillna(0).astype(int)
     for c in risk_cols:
@@ -85,6 +88,10 @@ def _qc_merge(spa: pd.DataFrame, sui: pd.DataFrame, merged: pd.DataFrame, key: L
         "key_used": key,
     }
 
+def _load_csv(path: Path) -> pd.DataFrame:
+    return pd.read_csv(path)
+
+# ----------------- API principal (para DAG/notebook) -----------------
 def merge_spa_sui(
     spa_df: pd.DataFrame,
     sui_df: pd.DataFrame,
@@ -93,9 +100,7 @@ def merge_spa_sui(
     with_clasif: bool = False,
     add_pcts: bool = True
 ) -> Tuple[pd.DataFrame, Dict[str, object]]:
-    """
-    Une SPA y Suicidas (ambos tidy). Devuelve (merged, qc).
-    """
+    """Une SPA y Suicidas (ambos tidy). Devuelve (merged, qc)."""
     spa, site_cols = _prepare_spa(spa_df)
     sui, risk_cols = _prepare_sui(sui_df)
 
@@ -118,13 +123,11 @@ def merge_spa_sui(
 
     # porcentajes derivados (opcional)
     if add_pcts:
-        # riesgos sobre total suicidas
         if "casos_sui" in merged.columns:
             denom_sui = merged["casos_sui"].replace({0: pd.NA})
             for c in risk_cols:
                 if c in merged.columns:
                     merged[f"pct_{c}"] = (merged[c] / denom_sui).astype("Float64").round(4)
-        # sitios sobre total SPA
         if "casos_spa" in merged.columns:
             denom_spa = merged["casos_spa"].replace({0: pd.NA})
             for c in site_cols:
@@ -134,16 +137,54 @@ def merge_spa_sui(
     qc = _qc_merge(spa, sui, merged, key)
     return merged, qc
 
-# -------- helpers opcionales para DAG/IO --------
+# ----------------- Helper IO para uso simple -----------------
 def load_and_merge(
-    spa_csv: str,
-    sui_csv: str,
+    spa_csv: str | Path,
+    sui_csv: str | Path,
     *,
     how: str = "inner",
     with_clasif: bool = False,
     add_pcts: bool = True
 ) -> Tuple[pd.DataFrame, Dict[str, object]]:
-    """Carga CSVs y llama merge_spa_sui()."""
-    spa = pd.read_csv(spa_csv)
-    sui = pd.read_csv(sui_csv)
+    spa = _load_csv(Path(spa_csv))
+    sui = _load_csv(Path(sui_csv))
     return merge_spa_sui(spa, sui, how=how, with_clasif=with_clasif, add_pcts=add_pcts)
+
+# ----------------- MAIN (para correr local por CLI) -----------------
+def _parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="Merge SPA y Conductas Suicidas (salidas tidy).")
+    ap.add_argument("--spa", required=True, type=Path, help="CSV tidy de SPA.")
+    ap.add_argument("--sui", required=True, type=Path, help="CSV tidy de Conductas Suicidas.")
+    ap.add_argument("--output", required=True, type=Path, help="CSV de salida del merge.")
+    ap.add_argument("--how", choices=["inner","left","right","outer"], default="inner", help="Tipo de merge (default: inner).")
+    ap.add_argument("--with-clasif", action="store_true", help="Usar 'clasificacion' en la clave si existe en ambos.")
+    ap.add_argument("--add-pcts", action="store_true", help="Agregar columnas de porcentajes derivados.")
+    ap.add_argument("--report", type=Path, default=None, help="Guardar JSON con QC del merge.")
+    return ap.parse_args()
+
+def main():
+    args = _parse_args()
+
+    merged, qc = load_and_merge(
+        spa_csv=args.spa,
+        sui_csv=args.sui,
+        how=args.how,
+        with_clasif=args.with_clasif,
+        add_pcts=args.add_pcts,
+    )
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    merged.to_csv(args.output, index=False, encoding="utf-8")
+    print(f"[OK] Merge guardado: {args.output}  ({len(merged)} filas)")
+    print("Clave usada:", qc["key_used"])
+
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.report, "w", encoding="utf-8") as f:
+            json.dump(qc, f, ensure_ascii=False, indent=2)
+        print(f"[OK] Reporte QC: {args.report}")
+    else:
+        print("QC:", qc)
+
+if __name__ == "__main__":
+    main()

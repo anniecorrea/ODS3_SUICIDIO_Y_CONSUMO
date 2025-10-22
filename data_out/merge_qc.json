@@ -1,0 +1,14 @@
+{
+  "rows_spa": 22603,
+  "rows_sui": 61162,
+  "rows_merged": 23563,
+  "spa_without_match": 7595,
+  "sui_without_match": 37599,
+  "key_used": [
+    "anio",
+    "upz",
+    "sexo",
+    "ciclo_vida",
+    "nivel_educativo"
+  ]
+}

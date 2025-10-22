@@ -79,6 +79,40 @@ def normalize_clasif(series: pd.Series) -> pd.Series:
     return s.where(s.isin({"ideacion", "intento", "sin dato"}), "otra")
 
 
+def normalize_ciclo_vida(series: pd.Series) -> pd.Series:
+    """Extrae solo el nombre del ciclo de vida, removiendo rangos de edad."""
+    s = series.map(_normalize_text, na_action="ignore")
+    # Mapeo de variantes al nombre estándar
+    mapping = {
+        "0  5 primera infancia": "primera infancia",
+        "6  11 infancia": "infancia",
+        "12  17 adolescencia": "adolescencia",
+        "18  28 juventud": "juventud",
+        "29  59 adultez": "adultez",
+        ">60 vejez": "vejez",
+        # También mapear variantes sin números
+        "primera infancia": "primera infancia",
+        "infancia": "infancia",
+        "adolescencia": "adolescencia",
+        "juventud": "juventud",
+        "adultez": "adultez",
+        "vejez": "vejez",
+    }
+    return s.replace(mapping).fillna("sin dato")
+
+
+def normalize_nivel_educativo(series: pd.Series) -> pd.Series:
+    """Normaliza nivel educativo para consistencia entre datasets."""
+    s = series.map(_normalize_text, na_action="ignore")
+    # Unificar variantes de tecnico
+    s = s.str.replace("tecnico pos secundaria", "tecnico post-secundaria", regex=False)
+    s = s.str.replace("tecnico post secundaria", "tecnico post-secundaria", regex=False)
+    # Unificar completo/completa, incompleto/incompleta
+    s = s.str.replace(" completo", " completa", regex=False)
+    s = s.str.replace(" incompleto", " incompleta", regex=False)
+    return s.fillna("sin dato")
+
+
 def quality_report(df: pd.DataFrame, key_cols: Iterable[str]) -> Dict[str, object]:
     return {
         "rows": int(len(df)),
@@ -115,9 +149,10 @@ def transform_conductasuicida(
     })
 
     # 2) normalización ligera
-    for c in ["upz", "ciclo_vida", "nivel_educativo"]:
-        df[c] = unify_missing(df[c])
+    df["upz"] = unify_missing(df["upz"])
     df["sexo"] = standardize_sex(df["sexo"])
+    df["ciclo_vida"] = normalize_ciclo_vida(df["ciclo_vida"])
+    df["nivel_educativo"] = normalize_nivel_educativo(df["nivel_educativo"])
 
     # 3) tipos y 'casos'
     df["anio"] = pd.to_numeric(df["anio"], errors="coerce").astype("Int64")
