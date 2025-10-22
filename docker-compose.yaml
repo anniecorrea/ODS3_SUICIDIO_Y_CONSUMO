@@ -59,7 +59,7 @@ x-airflow-common:
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'true'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
-    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-pandas mysql-connector-python SQLAlchemy pymysql google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2}
+    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-pandas mysql-connector-python SQLAlchemy pymysql google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2 openpyxl}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./data:/opt/airflow/data

@@ -230,21 +230,18 @@ def etl_pipeline():
             logger.info("Iniciando Quality Check sobre datos merged...")
             
             import subprocess
-            import json
             
             # Crear directorio de salida si no existe
             OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
             
             script_path = SRC_DIR / "quality" / "quality_check.py"
             input_path = OUTPUT_DIR / "merged_spa_suicidas.csv"
-            report_path = OUTPUT_DIR / "quality_check_report.json"
             excel_path = OUTPUT_DIR / "quality_check_detail.xlsx"
             
             result = subprocess.run([
                 "python",
                 str(script_path),
                 "--input", str(input_path),
-                "--report", str(report_path),
                 "--excel", str(excel_path)
             ], capture_output=True, text=True, cwd=str(BASE_DIR))
             
@@ -253,15 +250,9 @@ def etl_pipeline():
                 raise Exception(f"Quality Check falló: {result.stderr}")
             
             logger.info(result.stdout)
+            logger.info("✅ Quality Check completado exitosamente")
             
-            # Leer reporte para retornar
-            with open(report_path, "r", encoding="utf-8") as f:
-                qc_report = json.load(f)
-            
-            logger.info(f"Quality Check completado exitosamente")
-            logger.info(f"Métricas de calidad: {qc_report}")
-            
-            return {"status": "success", "metrics": qc_report}
+            return {"status": "success", "message": "Quality Check completado - ver logs y Excel para detalles"}
             
         except Exception as e:
             logger.error(f"Error en Quality Check: {e}")

@@ -199,41 +199,57 @@ def ejecutar_quality_check(input_csv, output_report=None, output_excel=None):
     validez = calcular_validez(df)
     actualidad = calcular_actualidad(df)
     
+    # Helper: asegurar que los valores sean serializables por json
+    def _to_serializable(x):
+        # None para NaN
+        if pd.isna(x):
+            return None
+        # numpy bool / bool
+        if isinstance(x, (np.bool_, bool)):
+            return bool(x)
+        # numpy integer types
+        if isinstance(x, (np.integer,)):
+            return int(x)
+        # numpy float types
+        if isinstance(x, (np.floating,)):
+            return float(x)
+        return x
+
     reporte_metricas = {
         "completitud": {
-            "valor": completitud,
+            "valor": _to_serializable(completitud),
             "meta": 95,
-            "cumple": completitud >= 95,
+            "cumple": _to_serializable(completitud >= 95),
             "observaciones": "No existen valores faltantes" if completitud == 100 else "Algunas columnas con valores nulos"
         },
         "exactitud": {
-            "valor": exactitud,
+            "valor": _to_serializable(exactitud),
             "meta": 99,
-            "cumple": exactitud >= 99,
+            "cumple": _to_serializable(exactitud >= 99),
             "observaciones": "Todos los valores correctos" if exactitud == 100 else "Algunos valores ligeramente fuera de rango"
         },
         "consistencia": {
-            "valor": consistencia,
+            "valor": _to_serializable(consistencia),
             "meta": 95,
-            "cumple": consistencia >= 95,
+            "cumple": _to_serializable(consistencia >= 95),
             "observaciones": "Perfectamente consistentes" if consistencia == 100 else "Leves diferencias en la suma de porcentajes"
         },
         "unicidad": {
-            "valor": unicidad,
+            "valor": _to_serializable(unicidad),
             "meta": 100,
-            "cumple": unicidad == 100,
+            "cumple": _to_serializable(unicidad == 100),
             "observaciones": "No hay duplicados" if unicidad == 100 else "Existen filas duplicadas"
         },
         "validez": {
-            "valor": validez,
+            "valor": _to_serializable(validez),
             "meta": 98,
-            "cumple": validez >= 98,
+            "cumple": _to_serializable(validez >= 98),
             "observaciones": "Datos válidos en todos los casos" if validez == 100 else "Algunos infantes/adolescentes con niveles educativos altos"
         },
         "actualidad": {
-            "valor": actualidad,
+            "valor": _to_serializable(actualidad),
             "meta": 100,
-            "cumple": actualidad == 100,
+            "cumple": _to_serializable(actualidad == 100),
             "observaciones": "Todos los registros dentro del rango esperado" if actualidad == 100 else "Algunos años fuera del rango"
         }
     }
@@ -247,18 +263,18 @@ def ejecutar_quality_check(input_csv, output_report=None, output_excel=None):
     logger.info(f"Validez: {validez}% {'✅' if validez >= 98 else '❌'}")
     logger.info(f"Actualidad: {actualidad}% {'✅' if actualidad == 100 else '❌'}")
     
-    # Guardar reporte JSON
-    if output_report:
-        logger.info(f"Guardando reporte JSON en {output_report}")
-        with open(output_report, 'w', encoding='utf-8') as f:
-            json.dump(reporte_metricas, f, indent=2, ensure_ascii=False)
-    
     # Guardar reporte Excel detallado
     if output_excel:
         logger.info(f"Guardando reporte Excel en {output_excel}")
-        with pd.ExcelWriter(output_excel) as writer:
-            for col, df_col in reporte_columnas.items():
-                df_col.to_excel(writer, sheet_name=col[:31], index=False)
+        try:
+            with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
+                for col, df_col in reporte_columnas.items():
+                    df_col.to_excel(writer, sheet_name=col[:31], index=False)
+            logger.info(f"✅ Reporte Excel guardado exitosamente")
+        except ImportError:
+            logger.warning("⚠️ No se pudo generar Excel (falta openpyxl). Reporte disponible en logs.")
+    
+    logger.info("✅ Quality Check completado")
     
     return reporte_metricas
 
