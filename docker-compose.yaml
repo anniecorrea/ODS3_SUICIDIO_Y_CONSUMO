@@ -62,9 +62,7 @@ x-airflow-common:
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-pandas mysql-connector-python SQLAlchemy pymysql google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2 openpyxl}
   volumes:
     - ./dags:/opt/airflow/dags
-    - ./data:/opt/airflow/data
     - ./logs:/opt/airflow/logs
-    - ./plugins:/opt/airflow/plugins
     - ./src:/opt/airflow/src
     - ./notebooks:/opt/airflow/notebooks
     - ./data_out:/opt/airflow/data_out
