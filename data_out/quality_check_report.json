@@ -1,0 +1,38 @@
+{
+  "completitud": {
+    "valor": 100.0,
+    "meta": 95,
+    "cumple": true,
+    "observaciones": "No existen valores faltantes"
+  },
+  "exactitud": {
+    "valor": 100.0,
+    "meta": 99,
+    "cumple": true,
+    "observaciones": "Todos los valores correctos"
+  },
+  "consistencia": {
+    "valor": 100.0,
+    "meta": 95,
+    "cumple": true,
+    "observaciones": "Perfectamente consistentes"
+  },
+  "unicidad": {
+    "valor": 100.0,
+    "meta": 100,
+    "cumple": true,
+    "observaciones": "No hay duplicados"
+  },
+  "validez": {
+    "valor": 99.79,
+    "meta": 98,
+    "cumple": true,
+    "observaciones": "Algunos infantes/adolescentes con niveles educativos altos"
+  },
+  "actualidad": {
+    "valor": 100.0,
+    "meta": 100,
+    "cumple": true,
+    "observaciones": "Todos los registros dentro del rango esperado"
+  }
+}

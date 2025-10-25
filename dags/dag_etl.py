@@ -224,6 +224,41 @@ def etl_pipeline():
             raise
 
     @task()
+    def quality_check():
+        """Ejecuta Quality Check sobre el dataset merged."""
+        try:
+            logger.info("Iniciando Quality Check sobre datos merged...")
+            
+            import subprocess
+            
+            # Crear directorio de salida si no existe
+            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            
+            script_path = SRC_DIR / "quality" / "quality_check.py"
+            input_path = OUTPUT_DIR / "merged_spa_suicidas.csv"
+            excel_path = OUTPUT_DIR / "quality_check_detail.xlsx"
+            
+            result = subprocess.run([
+                "python",
+                str(script_path),
+                "--input", str(input_path),
+                "--excel", str(excel_path)
+            ], capture_output=True, text=True, cwd=str(BASE_DIR))
+            
+            if result.returncode != 0:
+                logger.error(f"Error ejecutando Quality Check: {result.stderr}")
+                raise Exception(f"Quality Check falló: {result.stderr}")
+            
+            logger.info(result.stdout)
+            logger.info("✅ Quality Check completado exitosamente")
+            
+            return {"status": "success", "message": "Quality Check completado - ver logs y Excel para detalles"}
+            
+        except Exception as e:
+            logger.error(f"Error en Quality Check: {e}")
+            raise
+
+    @task()
     def load_to_mysql():
         """Carga los datos transformados al modelo dimensional en MySQL."""
         try:
@@ -284,13 +319,16 @@ def etl_pipeline():
     # Merge (depende de ambas transformaciones)
     merge_task = merge_datasets()
     
-    # Load a MySQL (depende del merge)
+    # Quality Check (depende del merge)
+    qc_task = quality_check()
+    
+    # Load a MySQL (depende del Quality Check)
     load_task = load_to_mysql()
     
     # Definir el flujo de dependencias
     extract_sui >> transform_sui >> merge_task
     extract_spa >> transform_spa_task >> merge_task
-    merge_task >> load_task
+    merge_task >> qc_task >> load_task
 
 
 # Instanciar el DAG
