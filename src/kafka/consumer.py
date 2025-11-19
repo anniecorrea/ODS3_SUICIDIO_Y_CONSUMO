@@ -1,148 +1,139 @@
+import mysql.connector
 from kafka import KafkaConsumer
 import json
-import pandas as pd
+import logging
 
-# Configuración de Kafka
-KAFKA_TOPIC = 'ods3_kpis'
-KAFKA_BOOTSTRAP_SERVERS = ['localhost:9092']
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-def calcular_kpis(df):
-		import unicodedata
-		BAD_SET = {"", "nan", "sin dato", "upz sin asignar", "s/d", "n.a.", "n.a", "na"}
-		# Normalización y limpieza siguiendo las transformaciones ETL
-		def _normalize_text(v):
-			if v is None or (isinstance(v, float) and pd.isna(v)):
-				return None
-			s = str(v).strip().lower()
-			s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("utf-8")
-			return s
+# Kafka configuration
+KAFKA_TOPIC = 'ods3_topic'
+KAFKA_SERVER = 'localhost:9092'
 
-		def unify_missing(series, bad=BAD_SET):
-			s = series.map(_normalize_text, na_action="ignore")
-			mask = s.isna() | s.isin(set(bad))
-			return s.where(~mask, "sin dato")
+# Database configuration
+DB_CONFIG = {
+    'host': 'localhost',
+    'port': 3306,
+    'user': 'root',
+    'password': 'root',
+    'database': 'ods3_kpis'
+}
 
-		def standardize_sex(series):
-			s = series.map(_normalize_text, na_action="ignore")
-			s = s.replace({
-				"h": "hombre", "m": "mujer",
-				"masculino": "hombre", "femenino": "mujer",
-				"male": "hombre", "female": "mujer",
-			})
-			s = s.where(s.isin({"hombre", "mujer", "sin dato"}), "otro").fillna("sin dato")
-			return s
+def create_database_and_tables():
+    """Create the database and tables if they do not exist."""
+    connection = mysql.connector.connect(
+        host=DB_CONFIG['host'],
+        port=DB_CONFIG['port'],
+        user=DB_CONFIG['user'],
+        password=DB_CONFIG['password']
+    )
+    cursor = connection.cursor()
 
-		def normalize_ciclo_vida(series):
-			mapping = {
-				"0  5 primera infancia": "primera infancia",
-				"6  11 infancia": "infancia",
-				"12  17 adolescencia": "adolescencia",
-				"18  28 juventud": "juventud",
-				"29  59 adultez": "adultez",
-				">60 vejez": "vejez",
-				"primera infancia": "primera infancia",
-				"infancia": "infancia",
-				"adolescencia": "adolescencia",
-				"juventud": "juventud",
-				"adultez": "adultez",
-				"vejez": "vejez",
-			}
-			s = series.map(_normalize_text, na_action="ignore")
-			return s.replace(mapping).fillna("sin dato")
+    # Create database if not exists
+    cursor.execute(f"CREATE DATABASE IF NOT EXISTS {DB_CONFIG['database']}")
+    cursor.execute(f"USE {DB_CONFIG['database']}")
 
-		def normalize_nivel_educativo(series):
-			s = series.map(_normalize_text, na_action="ignore")
-			s = s.str.replace("tecnico pos secundaria", "tecnico post-secundaria", regex=False)
-			s = s.str.replace("tecnico post secundaria", "tecnico post-secundaria", regex=False)
-			s = s.str.replace(" completo", " completa", regex=False)
-			s = s.str.replace(" incompleto", " incompleta", regex=False)
-			return s.fillna("sin dato")
+    # Create table if not exists
+    create_table_query = (
+        "CREATE TABLE IF NOT EXISTS fact_casos ("
+        "id_fact INT AUTO_INCREMENT PRIMARY KEY,"
+        "id_tiempo INT,"
+        "anio INT,"
+        "id_ubicacion INT,"
+        "upz VARCHAR(100),"  # Nueva columna
+        "id_perfil INT,"
+        "sexo VARCHAR(20),"  # Nueva columna
+        "ciclo_vida VARCHAR(50),"  # Nueva columna
+        "nivel_educativo VARCHAR(100),"  # Nueva columna
+        "id_clasificacion INT,"
+        "clasificacion VARCHAR(100),"  # Nueva columna
+        "casos_spa INT,"
+        "casos_sui INT,"
+        "sitio_vivienda INT,"
+        "sitio_parque INT,"
+        "sitio_est_educativo INT,"
+        "sitio_bares_tabernas INT,"
+        "sitio_via_publica INT,"
+        "sitio_casa_amigos INT,"
+        "pct_sitio_vivienda FLOAT,"
+        "pct_sitio_parque FLOAT,"
+        "pct_sitio_est_educativo FLOAT,"
+        "pct_sitio_bares_tabernas FLOAT,"
+        "pct_sitio_via_publica FLOAT,"
+        "pct_sitio_casa_amigos FLOAT,"
+        "enfermedades_dolorosas INT,"
+        "maltrato_sexual INT,"
+        "muerte_familiar INT,"
+        "conflicto_pareja INT,"
+        "problemas_economicos INT,"
+        "esc_educ INT,"
+        "problemas_juridicos INT,"
+        "problemas_laborales INT,"
+        "suicidio_amigo INT,"
+        "pct_enfermedades_dolorosas FLOAT,"
+        "pct_maltrato_sexual FLOAT,"
+        "pct_muerte_familiar FLOAT,"
+        "pct_conflicto_pareja FLOAT,"
+        "pct_problemas_economicos FLOAT,"
+        "pct_esc_educ FLOAT,"
+        "pct_problemas_juridicos FLOAT,"
+        "pct_problemas_laborales FLOAT,"
+        "pct_suicidio_amigo FLOAT"
+        ")"
+    )
+    cursor.execute(create_table_query)
 
-		# Aplicar transformaciones
-		for col in ['upz', 'sexo', 'ciclo_vida', 'nivel_educativo']:
-			if col in df.columns:
-				if col == 'upz':
-					df[col] = unify_missing(df[col])
-				elif col == 'sexo':
-					df[col] = standardize_sex(df[col])
-				elif col == 'ciclo_vida':
-					df[col] = normalize_ciclo_vida(df[col])
-				elif col == 'nivel_educativo':
-					df[col] = normalize_nivel_educativo(df[col])
+    connection.commit()
+    cursor.close()
+    connection.close()
 
-		# Limpieza estricta de la clave
-		key = ['anio', 'upz', 'sexo', 'ciclo_vida', 'nivel_educativo']
-		df = df.dropna(subset=key)
-		# Acumular condiciones de limpieza para todas las columnas clave
-		mask = pd.Series([True] * len(df), index=df.index)
-		for c in ['upz', 'sexo', 'ciclo_vida', 'nivel_educativo']:
-			s = df[c].astype("string").str.strip().str.lower()
-			mask &= ~s.isin(BAD_SET)
-		df = df.loc[mask]
+def save_to_db(filtered_data):
+    """Save filtered data to the database."""
+    connection = mysql.connector.connect(**DB_CONFIG)
+    cursor = connection.cursor()
 
-		# Filtrar solo jóvenes
-		df_jovenes = df[df['ciclo_vida'].isin(['adolescencia', 'juventud'])].copy()
-		print(f"Total registros jóvenes: {len(df_jovenes)}")
+    insert_query = (
+        "INSERT INTO fact_casos (id_tiempo, anio, id_ubicacion, upz, id_perfil, sexo, ciclo_vida, nivel_educativo, id_clasificacion, clasificacion, "
+        "casos_spa, casos_sui, sitio_vivienda, sitio_parque, sitio_est_educativo, sitio_bares_tabernas, sitio_via_publica, sitio_casa_amigos, "
+        "pct_sitio_vivienda, pct_sitio_parque, pct_sitio_est_educativo, pct_sitio_bares_tabernas, pct_sitio_via_publica, pct_sitio_casa_amigos, "
+        "enfermedades_dolorosas, maltrato_sexual, muerte_familiar, conflicto_pareja, problemas_economicos, esc_educ, problemas_juridicos, problemas_laborales, suicidio_amigo, "
+        "pct_enfermedades_dolorosas, pct_maltrato_sexual, pct_muerte_familiar, pct_conflicto_pareja, pct_problemas_economicos, pct_esc_educ, pct_problemas_juridicos, pct_problemas_laborales, pct_suicidio_amigo) "
+        "VALUES (%(id_tiempo)s, %(anio)s, %(id_ubicacion)s, %(upz)s, %(id_perfil)s, %(sexo)s, %(ciclo_vida)s, %(nivel_educativo)s, %(id_clasificacion)s, %(clasificacion)s, "
+        "%(casos_spa)s, %(casos_sui)s, %(sitio_vivienda)s, %(sitio_parque)s, %(sitio_est_educativo)s, %(sitio_bares_tabernas)s, %(sitio_via_publica)s, %(sitio_casa_amigos)s, "
+        "%(pct_sitio_vivienda)s, %(pct_sitio_parque)s, %(pct_sitio_est_educativo)s, %(pct_sitio_bares_tabernas)s, %(pct_sitio_via_publica)s, %(pct_sitio_casa_amigos)s, "
+        "%(enfermedades_dolorosas)s, %(maltrato_sexual)s, %(muerte_familiar)s, %(conflicto_pareja)s, %(problemas_economicos)s, %(esc_educ)s, %(problemas_juridicos)s, %(problemas_laborales)s, %(suicidio_amigo)s, "
+        "%(pct_enfermedades_dolorosas)s, %(pct_maltrato_sexual)s, %(pct_muerte_familiar)s, %(pct_conflicto_pareja)s, %(pct_problemas_economicos)s, %(pct_esc_educ)s, %(pct_problemas_juridicos)s, %(pct_problemas_laborales)s, %(pct_suicidio_amigo)s)"
+    )
 
-		# Ejemplo de KPI: total de casos de SPA y suicidas por año y sexo
-		if 'casos_spa' in df_jovenes.columns:
-			kpi_spa = df_jovenes.groupby(['anio', 'sexo'])['casos_spa'].sum()
-			print("\nKPI: Total casos SPA por año y sexo:")
-			print(kpi_spa)
-		if 'casos_sui' in df_jovenes.columns:
-			kpi_sui = df_jovenes.groupby(['anio', 'sexo'])['casos_sui'].sum()
-			print("\nKPI: Total casos suicidas por año y sexo:")
-			print(kpi_sui)
-		# Puedes agregar más KPIs siguiendo la lógica de los scripts ETL
+    for record in filtered_data:
+        try:
+            cursor.execute(insert_query, record)
+            logger.info("Inserted record into database: %s", record)  # Added logging indicator
+        except mysql.connector.Error as err:
+            logger.error("Error inserting record: %s", err)
 
-if __name__ == '__main__':
-	consumer = KafkaConsumer(
-		KAFKA_TOPIC,
-		bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-		value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-		auto_offset_reset='earliest',
-		enable_auto_commit=True
-	)
-	print('Esperando datos de Kafka...')
+    connection.commit()
+    cursor.close()
+    connection.close()
 
-	tablas = [
-		'dim_tiempo',
-		'dim_ubicacion',
-		'dim_perfil_demografico',
-		'dim_clasificacion',
-		'fact_casos'
-	]
-	datos_acumulados = {tabla: [] for tabla in tablas}
+def main():
+    create_database_and_tables()
 
-	for message in consumer:
-		msg = message.value
-		tabla = msg.get('tabla')
-		registro = msg.get('registro')
-		if tabla in datos_acumulados:
-			datos_acumulados[tabla].append(registro)
+    consumer = KafkaConsumer(
+        KAFKA_TOPIC,
+        bootstrap_servers=KAFKA_SERVER,
+        value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+    )
 
-		# Procesar KPIs cada vez que se acumulen 5000 registros en fact_casos y haya datos en todas las tablas
-		if len(datos_acumulados['fact_casos']) >= 5000 and all(len(datos_acumulados[t]) > 0 for t in tablas):
-			df_fact = pd.DataFrame(datos_acumulados['fact_casos'])
-			df_tiempo = pd.DataFrame(datos_acumulados['dim_tiempo'])
-			df_ubicacion = pd.DataFrame(datos_acumulados['dim_ubicacion'])
-			df_perfil = pd.DataFrame(datos_acumulados['dim_perfil_demografico'])
-			df_clasificacion = pd.DataFrame(datos_acumulados['dim_clasificacion'])
+    for message in consumer:
+        record = message.value
+        if 'ciclo_vida' not in record:
+            logger.warning("Missing 'ciclo_vida' key in record: %s", record)
+            continue
 
-			df = df_fact.merge(df_tiempo, left_on='id_tiempo', right_on='id_tiempo', how='left')
-			df = df.merge(df_ubicacion, left_on='id_ubicacion', right_on='id_ubicacion', how='left')
-			df = df.merge(df_perfil, left_on='id_perfil', right_on='id_perfil', how='left')
-			df = df.merge(df_clasificacion, left_on='id_clasificacion', right_on='id_clasificacion', how='left')
+        if record['ciclo_vida'] in ['adolescencia', 'juventud']:
+            save_to_db([record])
 
-			df = df.rename(columns={
-				'anio': 'anio',
-				'upz': 'upz',
-				'sexo': 'sexo',
-				'ciclo_vida': 'ciclo_vida',
-				'nivel_educativo': 'nivel_educativo',
-				'clasificacion': 'clasificacion'
-			})
-
-			calcular_kpis(df)
-			# Limpiar solo los registros de fact_casos, mantener las dimensiones
-			datos_acumulados['fact_casos'] = []
+if __name__ == "__main__":
+    main()

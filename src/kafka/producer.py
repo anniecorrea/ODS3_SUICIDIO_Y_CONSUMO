@@ -1,71 +1,77 @@
 import mysql.connector
 from kafka import KafkaProducer
 import json
+import logging
 
-# Configuración de MySQL
-MYSQL_HOST = 'localhost'
-MYSQL_USER = 'root'
-MYSQL_PASSWORD = 'airflow'
-MYSQL_DATABASE = 'ODS3_SPA_SUICIDAS'
-MYSQL_PORT = 3307
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# Configuración de Kafka
-KAFKA_TOPIC = 'ods3_kpis'
-KAFKA_BOOTSTRAP_SERVERS = ['localhost:9092']
+# Kafka configuration
+KAFKA_TOPIC = 'ods3_topic'
+KAFKA_SERVER = 'localhost:9092'
 
-def extraer_todas_tablas():
-	tablas = [
-		'dim_tiempo',
-		'dim_ubicacion',
-		'dim_perfil_demografico',
-		'dim_clasificacion',
-		'fact_casos'
-	]
-	connection = mysql.connector.connect(
-		host=MYSQL_HOST,
-		user=MYSQL_USER,
-		password=MYSQL_PASSWORD,
-		database=MYSQL_DATABASE,
-		port=MYSQL_PORT
-	)
-	cursor = connection.cursor(dictionary=True)
-	datos_por_tabla = {}
-	for tabla in tablas:
-		cursor.execute(f'SELECT * FROM {tabla}')
-		datos_por_tabla[tabla] = cursor.fetchall()
-	cursor.close()
-	connection.close()
-	return datos_por_tabla
+# Database configuration
+DB_CONFIG = {
+    'host': 'localhost',
+    'port': 3307,
+    'user': 'root',
+    'password': 'airflow',
+    'database': 'ODS3_SPA_SUICIDAS'
+}
 
-def enviar_a_kafka(datos_por_tabla):
-	producer = KafkaProducer(
-		bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-		value_serializer=lambda v: json.dumps(v).encode('utf-8')
-	)
-	# Enviar dimensiones completas primero
-	for tabla in ['dim_tiempo', 'dim_ubicacion', 'dim_perfil_demografico', 'dim_clasificacion']:
-		for registro in datos_por_tabla[tabla]:
-			mensaje = {
-				'tabla': tabla,
-				'registro': registro
-			}
-			print(f"Enviando a Kafka | Tabla: {tabla} | Registro: {registro}")
-			producer.send(KAFKA_TOPIC, mensaje)
-	# Enviar fact_casos en lotes de 10,000
-	fact_casos = datos_por_tabla['fact_casos']
-	batch_size = 10000
-	for i in range(0, len(fact_casos), batch_size):
-		batch = fact_casos[i:i+batch_size]
-		for registro in batch:
-			mensaje = {
-				'tabla': 'fact_casos',
-				'registro': registro
-			}
-			print(f"Enviando a Kafka | Tabla: fact_casos | Registro: {registro}")
-			producer.send(KAFKA_TOPIC, mensaje)
-	producer.flush()
+def fetch_data_from_db():
+    """Fetch data from all dimensions and the fact table."""
+    connection = mysql.connector.connect(**DB_CONFIG)
+    cursor = connection.cursor(dictionary=True)
 
-if __name__ == '__main__':
-	datos_por_tabla = extraer_todas_tablas()
-	enviar_a_kafka(datos_por_tabla)
-	print('Datos de todas las tablas enviados a Kafka')
+    # Fetch data from dimensions
+    cursor.execute("SELECT * FROM dim_tiempo")
+    dim_tiempo = {row['id_tiempo']: row for row in cursor.fetchall()}
+
+    cursor.execute("SELECT * FROM dim_ubicacion")
+    dim_ubicacion = {row['id_ubicacion']: row for row in cursor.fetchall()}
+
+    cursor.execute("SELECT * FROM dim_perfil_demografico")
+    dim_perfil = {row['id_perfil']: row for row in cursor.fetchall()}
+
+    cursor.execute("SELECT * FROM dim_clasificacion")
+    dim_clasificacion = {row['id_clasificacion']: row for row in cursor.fetchall()}
+
+    # Fetch data from fact table
+    cursor.execute("SELECT * FROM fact_casos")
+    fact_casos = cursor.fetchall()
+
+    # Combine data into a flat structure
+    combined_data = []
+    for fact in fact_casos:
+        combined_record = {
+            **fact,
+            **dim_tiempo.get(fact['id_tiempo'], {}),
+            **dim_ubicacion.get(fact['id_ubicacion'], {}),
+            **dim_perfil.get(fact['id_perfil'], {}),
+            **dim_clasificacion.get(fact['id_clasificacion'], {})
+        }
+        combined_data.append(combined_record)
+
+    cursor.close()
+    connection.close()
+    return combined_data
+
+def send_to_kafka(data):
+    """Send data to Kafka topic."""
+    producer = KafkaProducer(
+        bootstrap_servers=KAFKA_SERVER,
+        value_serializer=lambda v: json.dumps(v).encode('utf-8')
+    )
+    for record in data:
+        producer.send(KAFKA_TOPIC, record)
+        logger.info("Sent record to Kafka: %s", record)  # Added logging indicator
+    producer.flush()
+
+def main():
+    data = fetch_data_from_db()
+    send_to_kafka(data)
+
+if __name__ == "__main__":
+    main()
