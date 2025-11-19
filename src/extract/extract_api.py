@@ -16,41 +16,34 @@ def extraer_datos_api(limit_por_pagina=32000):
     
     print("Iniciando extracción de datos...")
     
+    import ssl
+    context = ssl._create_unverified_context()
     try:
         while True:
             # Construir URL con offset y limit
             url = f"{base_url}?resource_id={resource_id}&limit={limit_por_pagina}&offset={offset}"
-            
-            # Realizar petición
-            with urllib.request.urlopen(url) as response:
+            # Realizar petición sin verificación SSL
+            with urllib.request.urlopen(url, context=context) as response:
                 data = json.loads(response.read().decode('utf-8'))
-            
             if not data.get('success'):
                 raise Exception("La API retornó un error")
-            
             result = data.get('result', {})
             records = result.get('records', [])
-            
             # Guardar el total de registros disponibles
             if total_registros is None:
                 total_registros = result.get('total', 0)
                 print(f"Total de registros disponibles: {total_registros}")
-            
             # Si no hay más registros, salir
             if not records:
                 break
-            
             # Agregar registros a la lista
             todos_los_registros.extend(records)
             print(f"Descargados: {len(todos_los_registros)} / {total_registros} registros...")
-            
             # Si ya obtuvimos todos los registros, salir
             if len(todos_los_registros) >= total_registros:
                 break
-            
             # Incrementar offset para la siguiente página
             offset += limit_por_pagina
-        
         # Construir respuesta completa
         respuesta_completa = {
             'success': True,
@@ -60,9 +53,7 @@ def extraer_datos_api(limit_por_pagina=32000):
                 'fields': data.get('result', {}).get('fields', [])
             }
         }
-        
         return respuesta_completa
-        
     except Exception as e:
         print(f"Error al consultar la API: {e}")
         raise
